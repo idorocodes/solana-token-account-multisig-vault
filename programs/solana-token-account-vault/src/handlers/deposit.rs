@@ -65,6 +65,8 @@ impl<'info> Deposit<'info> {
         let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
 
         transfer_checked(cpi_ctx, amount, self.vault_mint.decimals)?;
+
+        self.vault_config.balance += amount;
         Ok(())
     }
 }
