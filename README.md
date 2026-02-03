@@ -45,7 +45,5 @@ Physically: accounts + constraints
 * Deposit SPL tokens into the vault
 * Withdrawal locked behind unanimous approval
 * TypeScript tests for instruction validation
-
-
-* ⏳ Withdrawal instruction (next)
-* ⏳ Full multisig approval flow
+* Withdrawal instruction (next)
+* Full multisig approval flow
