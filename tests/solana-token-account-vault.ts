@@ -111,7 +111,7 @@ describe("solana-token-account-vault", () => {
       await provider.connection.getTokenAccountBalance(vault)
     ).value.uiAmount;
 
-  
+
       const vaultConfigVault = await program.account.vaultConfig.fetch(vaultPda);
       console.log("vault authority")
     expect(vaultBalance).to.equal(0);
