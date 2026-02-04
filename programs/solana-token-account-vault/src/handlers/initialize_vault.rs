@@ -46,15 +46,19 @@ pub struct Initialize<'info> {
 
 impl<'info> Initialize<'info> {
     pub fn initialize(&mut self, owners: Vec<Pubkey>, bump: &InitializeBumps) -> Result<()> {
-        let number_of_owners = owners.len();
+       
+        let mut vault_owners = owners;       
+        let number_of_owners = vault_owners.len() as u64 + 1;
+        vault_owners.push(self.signer.key());
+        
         self.vault_config.set_inner(VaultConfig {
             authority: self.signer.key(),
-            owners: owners,
+            owners: vault_owners,
             balance: 0,
             locked: false,
             signed: false,
             signed_owners: Vec::new(),
-            num_of_owners: number_of_owners as u64 + 1,
+            num_of_owners: number_of_owners,
             bump: bump.vault_config,
         });
         Ok(())

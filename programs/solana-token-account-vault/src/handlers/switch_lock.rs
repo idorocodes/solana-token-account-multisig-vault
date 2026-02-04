@@ -23,7 +23,7 @@ pub struct SwitchLock<'info> {
     pub signer_ata: InterfaceAccount<'info, TokenAccount>,
 
     #[account(mut,
-    seeds = [VAULT_SEED,signer.key().as_ref()],
+    seeds = [VAULT_SEED,vault_config.authority.as_ref()],
     bump
     )]
     pub vault_config: Account<'info, VaultConfig>,
@@ -52,7 +52,13 @@ impl<'info> SwitchLock<'info> {
             VaultError::NonAuthorityCannotSwitchLock
         );
 
-        vault_config.signed = !vault_config.signed;
+        let current_state = self.vault_config.locked;
+
+        if current_state == true {
+            self.vault_config.locked = false
+        } else {
+            self.vault_config.locked = true
+        }
 
         Ok(())
     }

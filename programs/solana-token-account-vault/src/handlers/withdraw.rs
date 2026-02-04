@@ -28,7 +28,7 @@ pub struct Withdraw<'info> {
     #[account(mut,
         close = authority,
         has_one = authority,
-    seeds = [VAULT_SEED,authority.key().as_ref()],
+    seeds = [VAULT_SEED,vault_config.authority.as_ref()],
     bump
     )]
     pub vault_config: Account<'info, VaultConfig>,
@@ -50,17 +50,22 @@ impl<'info> Withdraw<'info> {
     pub fn withdraw(&mut self, amount: u64) -> Result<()> {
         require!(amount > 0, VaultError::InvalidAmount);
         require!(
+            amount <= self.vault_config.balance,
+            VaultError::InvalidAmount
+        );
+        require!(amount <= self.vault.amount, VaultError::InvalidAmount);
+        require!(
             self.authority.key() == self.vault_config.authority,
             VaultError::InvalidAuthority
         );
 
         let vault_config = &mut self.vault_config;
-        require!(vault_config.locked == false, VaultError::VaultIsLocked);
+        require!(vault_config.locked == true, VaultError::VaultIsLocked);
         require!(
             vault_config.signed_owners.len() == vault_config.owners.len(),
             VaultError::VaultNotFullySigned
         );
-        vault_config.balance = vault_config.balance - amount;
+
         let authority_key = self.authority.key();
         let signer_seeds: &[&[&[u8]]] = &[&[
             b"idorosolvaut",
@@ -83,18 +88,7 @@ impl<'info> Withdraw<'info> {
 
         transfer_checked(transfer_ctx, amount, self.vault_mint.decimals)?;
 
-        let close_accounts = CloseAccount {
-            account: self.vault.to_account_info(),
-            destination: self.authority.to_account_info(),
-            authority: self.vault_config.to_account_info(),
-        };
-
-        let cpi_program = self.token_program.to_account_info();
-
-        let close_ctx = CpiContext::new_with_signer(cpi_program, close_accounts, signer_seeds);
-
-        close_account(close_ctx)?;
-        self.vault_config.balance += amount;
+        self.vault_config.balance -= amount;
         Ok(())
     }
 }

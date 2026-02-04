@@ -16,14 +16,7 @@ pub struct Sign<'info> {
     pub vault_mint: InterfaceAccount<'info, Mint>,
 
     #[account(mut,
-     associated_token::authority = signer,
-     associated_token::mint = vault_mint,
-     associated_token::token_program = token_program,
-    )]
-    pub signer_ata: InterfaceAccount<'info, TokenAccount>,
-
-    #[account(mut,
-    seeds = [VAULT_SEED,signer.key().as_ref()],
+    seeds = [VAULT_SEED,vault_config.authority.key().as_ref()],
     bump
     )]
     pub vault_config: Account<'info, VaultConfig>,
@@ -45,7 +38,7 @@ impl<'info> Sign<'info> {
     pub fn sign(&mut self) -> Result<()> {
         let vault_config = &mut self.vault_config;
 
-        require!(vault_config.locked == false, VaultError::VaultIsLocked);
+        require!(vault_config.locked == true, VaultError::VaultIsLocked);
         require!(
             vault_config.num_of_owners != vault_config.signed_owners.len() as u64,
             VaultError::VaultAlreadyFullySigned
@@ -57,15 +50,18 @@ impl<'info> Sign<'info> {
             vault_config.owners.contains(&signer),
             VaultError::InvalidSigner
         );
-        
+
         let is_signed = self.vault_config.signed_owners.contains(&signer);
 
         if !is_signed {
             self.vault_config.signed_owners.push(signer);
-        }else{
+        } else {
             return Err(VaultError::HasAlreadySigned.into());
         }
 
+        if self.vault_config.num_of_owners == self.vault_config.signed_owners.len() as u64 {
+            self.vault_config.signed = true
+        }
         Ok(())
     }
 }

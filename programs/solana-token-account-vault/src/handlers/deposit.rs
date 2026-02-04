@@ -23,7 +23,7 @@ pub struct Deposit<'info> {
     pub signer_ata: InterfaceAccount<'info, TokenAccount>,
 
     #[account(mut,
-    seeds = [VAULT_SEED,signer.key().as_ref()],
+    seeds = [VAULT_SEED,vault_config.authority.as_ref()],
     bump
     )]
     pub vault_config: Account<'info, VaultConfig>,
