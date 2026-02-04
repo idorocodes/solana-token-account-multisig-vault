@@ -1,7 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { SolanaTokenAccountVault } from "../target/types/solana_token_account_vault";
-import { expect } from "chai";
+import { expect, assert } from "chai";
 import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountInstruction,
@@ -9,16 +9,15 @@ import {
   mintTo,
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddress,
 } from "@solana/spl-token";
 
 describe("solana-token-account-vault", () => {
-  // Configure the client to use the local cluster.
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
   const program = anchor.workspace
     .SolanaTokenAccountVault as Program<SolanaTokenAccountVault>;
+  const connection = provider.connection;
 
   const authority = provider.wallet.publicKey;
   const ownerOne = anchor.web3.Keypair.generate();
@@ -29,269 +28,392 @@ describe("solana-token-account-vault", () => {
   let vaultMint: anchor.web3.PublicKey;
   let authorityAta: anchor.web3.PublicKey;
   let depositorAta: anchor.web3.PublicKey;
-  let vaultBump: number;
-
   let vaultPda: anchor.web3.PublicKey;
-  let vault: anchor.web3.PublicKey;
+  let vaultAta: anchor.web3.PublicKey;
 
   const amount = 4000;
 
   before(async () => {
-    await provider.connection.requestAirdrop(
+    // Airdrops
+    const signature = await connection.requestAirdrop(
       authority,
-      10 * anchor.web3.LAMPORTS_PER_SOL
+      2 * anchor.web3.LAMPORTS_PER_SOL
     );
-    await provider.connection.requestAirdrop(
-      ownerOne.publicKey,
-      10 * anchor.web3.LAMPORTS_PER_SOL
-    );
-    await provider.connection.requestAirdrop(
-      ownerTwo.publicKey,
-      10 * anchor.web3.LAMPORTS_PER_SOL
-    );
-    await provider.connection.requestAirdrop(
-      ownerThree.publicKey,
-      10 * anchor.web3.LAMPORTS_PER_SOL
-    );
-    await provider.connection.requestAirdrop(
-      depositor.publicKey,
-      10 * anchor.web3.LAMPORTS_PER_SOL
-    );
+    await connection.confirmTransaction(signature);
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    //Create mints
+    for (const user of [ownerOne, ownerTwo, ownerThree, depositor]) {
+      const sig = await connection.requestAirdrop(
+        user.publicKey,
+        2 * anchor.web3.LAMPORTS_PER_SOL
+      );
+      await connection.confirmTransaction(sig);
+    }
+
+    // Create Mint
     vaultMint = await createMint(
-      provider.connection,
-      provider.wallet.payer,
+      connection,
+      (provider.wallet as any).payer,
       authority,
       null,
       0
     );
 
-    //Create ATAs and mint tokens
+    // Create ATAs
     authorityAta = getAssociatedTokenAddressSync(vaultMint, authority);
-    const authorityAtaTx = new anchor.web3.Transaction().add(
-      createAssociatedTokenAccountInstruction(
-        provider.wallet.publicKey,
-        authorityAta,
-        authority,
-        vaultMint
-      )
-    );
-
     depositorAta = getAssociatedTokenAddressSync(
       vaultMint,
       depositor.publicKey
     );
-    const depositorAtaTx = new anchor.web3.Transaction().add(
+
+    const tx = new anchor.web3.Transaction().add(
       createAssociatedTokenAccountInstruction(
-        provider.wallet.publicKey,
+        authority,
+        authorityAta,
+        authority,
+        vaultMint
+      ),
+      createAssociatedTokenAccountInstruction(
+        authority,
         depositorAta,
         depositor.publicKey,
         vaultMint
       )
     );
+    await provider.sendAndConfirm(tx);
 
-    await provider.sendAndConfirm(depositorAtaTx);
-
-    await provider.sendAndConfirm(authorityAtaTx);
-
+    // Mint tokens
     await mintTo(
-      provider.connection,
-      provider.wallet.payer,
+      connection,
+      (provider.wallet as any).payer,
       vaultMint,
       authorityAta,
       authority,
       amount * 2
     );
-
     await mintTo(
-      provider.connection,
-      provider.wallet.payer,
+      connection,
+      (provider.wallet as any).payer,
       vaultMint,
       depositorAta,
       authority,
       amount * 2
     );
+
+    // PDA Derivation
+    [vaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("idorosolvaut"), authority.toBuffer()],
+      program.programId
+    );
+    vaultAta = getAssociatedTokenAddressSync(vaultMint, vaultPda, true);
   });
 
   it("Initialize Vault !", async () => {
     let owners = [ownerOne.publicKey, ownerTwo.publicKey, ownerThree.publicKey];
-    [vaultPda, vaultBump] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("idorosolvaut"), authority.toBuffer()],
-      program.programId
-    );
-    vault = getAssociatedTokenAddressSync(vaultMint, vaultPda, true);
-
-    const tx = await program.methods
+    await program.methods
       .initialize(owners)
       .accountsStrict({
         signer: authority,
-        vaultMint: vaultMint,
+        vaultMint,
         signerAta: authorityAta,
         vaultConfig: vaultPda,
-        vault: vault,
+        vault: vaultAta,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
-    console.log("Your transaction signature", tx);
 
-    const vaultBalance = (
-      await provider.connection.getTokenAccountBalance(vault)
-    ).value.uiAmount;
-
-    const vaultConfigVault = await program.account.vaultConfig.fetch(vaultPda);
+    const vaultBalance = (await connection.getTokenAccountBalance(vaultAta))
+      .value.uiAmount;
     expect(vaultBalance).to.equal(0);
   });
 
-  it("Deposit Vault !", async () => {
-    let amount = 10;
-    vault = getAssociatedTokenAddressSync(vaultMint, vaultPda, true);
-
-    const tx = await program.methods
-      .deposit(new anchor.BN(amount))
-      .accountsStrict({
-        signer: authority,
-        vaultMint: vaultMint,
-        signerAta: authorityAta,
-        vaultConfig: vaultPda,
-        vault: vault,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .rpc();
-    console.log("Your transaction signature", tx);
-
-    const vaultBalance = (
-      await provider.connection.getTokenAccountBalance(vault)
-    ).value.uiAmount;
-
-    expect(vaultBalance).to.equal(amount);
+  it("Cannot Deposit into Vault if amount is less than 0 or 0 !", async () => {
+    try {
+      await program.methods
+        .deposit(new anchor.BN(0))
+        .accountsStrict({
+          signer: authority,
+          vaultMint,
+          signerAta: authorityAta,
+          vaultConfig: vaultPda,
+          vault: vaultAta,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      assert.fail("Should have failed");
+    } catch (error) {
+      const err = anchor.AnchorError.parse(error.logs);
+      assert.strictEqual(err.error.errorCode.code, "InvalidAmount");
+    }
   });
 
-  it("Switch Vault Lock !", async () => {
-    vault = getAssociatedTokenAddressSync(vaultMint, vaultPda, true);
-
-    const tx = await program.methods
+  it("Cannot Deposit into Vault if locked ", async () => {
+    // First, lock the vault
+    await program.methods
       .switchVaultLock()
       .accountsStrict({
         signer: authority,
-        vaultMint: vaultMint,
+        vaultMint,
         signerAta: authorityAta,
         vaultConfig: vaultPda,
-        vault: vault,
+        vault: vaultAta,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
-    console.log("Your transaction signature", tx);
 
-    const vaultBalance = (
-      await provider.connection.getTokenAccountBalance(vault)
-    ).value.uiAmount;
-    console.log(vaultBalance);
-    const vaultConfigVault = await program.account.vaultConfig.fetch(vaultPda);
-    expect(vaultConfigVault.locked).to.equal(true);
+    try {
+      await program.methods
+        .deposit(new anchor.BN(10))
+        .accountsStrict({
+          signer: authority,
+          vaultMint,
+          signerAta: authorityAta,
+          vaultConfig: vaultPda,
+          vault: vaultAta,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      assert.fail("Should have failed");
+    } catch (error) {
+      const err = anchor.AnchorError.parse(error.logs);
+      assert.strictEqual(err.error.errorCode.code, "VaultIsLocked");
+    }
   });
 
-  it("Sign the vault !", async () => {
-    vault = getAssociatedTokenAddressSync(vaultMint, vaultPda, true);
-
+  it("Deposit Vault !", async () => {
+    // Unlock first
     await program.methods
-      .sign()
+      .switchVaultLock()
       .accountsStrict({
         signer: authority,
-        vaultMint: vaultMint,
+        vaultMint,
+        signerAta: authorityAta,
         vaultConfig: vaultPda,
-        vault: vault,
+        vault: vaultAta,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
 
+    const depositAmount = 10;
     await program.methods
-      .sign()
+      .deposit(new anchor.BN(depositAmount))
       .accountsStrict({
-        signer: ownerOne.publicKey,
-        vaultMint: vaultMint,
+        signer: authority,
+        vaultMint,
+        signerAta: authorityAta,
         vaultConfig: vaultPda,
-        vault: vault,
+        vault: vaultAta,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
+      .rpc();
+
+    const vaultBalance = (await connection.getTokenAccountBalance(vaultAta))
+      .value.uiAmount;
+    expect(vaultBalance).to.equal(depositAmount);
+  });
+
+  it("Cannot Switch Vault if not owner !", async () => {
+    try {
+      await program.methods
+        .switchVaultLock()
+        .accountsStrict({
+          signer: depositor.publicKey,
+          vaultMint,
+          signerAta: depositorAta,
+          vaultConfig: vaultPda,
+          vault: vaultAta,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([depositor])
+        .rpc();
+      assert.fail("Should have failed");
+    } catch (error) {
+      const err = anchor.AnchorError.parse(error.logs);
+      assert.strictEqual(err.error.errorCode.code, "NonAuthorityCannotSwitchLock");
+    }
+  });
+
+  it("Switch Vault Lock !", async () => {
+    await program.methods
+      .switchVaultLock()
+      .accountsStrict({
+        signer: authority,
+        vaultMint,
+        signerAta: authorityAta,
+        vaultConfig: vaultPda,
+        vault: vaultAta,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const config = await program.account.vaultConfig.fetch(vaultPda);
+    expect(config.locked).to.equal(true);
+  });
+
+  it("Cannot sign Vault if not an owner !", async () => {
+    try {
+      await program.methods
+        .switchVaultLock()
+        .accountsStrict({
+          signer: authority,
+          vaultMint,
+          signerAta: authorityAta,
+          vaultConfig: vaultPda,
+          vault: vaultAta,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+
+      await program.methods
+        .sign()
+        .accountsStrict({
+          signer: depositor.publicKey,
+          vaultMint,
+          vaultConfig: vaultPda,
+          vault: vaultAta,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([depositor])
+        .rpc();
+      assert.fail("Should have failed");
+    } catch (error) {
+      const err = anchor.AnchorError.parse(error.logs);
+      assert.strictEqual(err.error.errorCode.code, "InvalidSigner");
+    }
+  });
+
+  it("All owners sign the vault !", async () => {
+    const common = {
+      vaultMint,
+      vaultConfig: vaultPda,
+      vault: vaultAta,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: anchor.web3.SystemProgram.programId,
+    };
+
+    await program.methods
+      .sign()
+      .accountsStrict({ signer: authority, ...common })
+      .rpc();
+    await program.methods
+      .sign()
+      .accountsStrict({ signer: ownerOne.publicKey, ...common })
       .signers([ownerOne])
       .rpc();
-
     await program.methods
       .sign()
-      .accountsStrict({
-        signer: ownerTwo.publicKey,
-        vaultMint: vaultMint,
-        vaultConfig: vaultPda,
-        vault: vault,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
+      .accountsStrict({ signer: ownerTwo.publicKey, ...common })
       .signers([ownerTwo])
       .rpc();
-
     await program.methods
       .sign()
-      .accountsStrict({
-        signer: ownerThree.publicKey,
-        vaultMint: vaultMint,
-        vaultConfig: vaultPda,
-        vault: vault,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
+      .accountsStrict({ signer: ownerThree.publicKey, ...common })
       .signers([ownerThree])
       .rpc();
 
-    const vaultConfigVault = await program.account.vaultConfig.fetch(vaultPda);
-    expect(vaultConfigVault.signed).to.equal(true);
+    const config = await program.account.vaultConfig.fetch(vaultPda);
+    expect(config.signed).to.equal(true);
   });
 
-  it("Withdraw from Vault and close!", async () => {
-    vault = getAssociatedTokenAddressSync(vaultMint, vaultPda, true);
-    const withdrawAmount = new anchor.BN(5);
+  it("Cannot re-sign Vault that has been signed !", async () => {
+    try {
+      await program.methods
+        .sign()
+        .accountsStrict({
+          signer: authority,
+          vaultMint,
+          vaultConfig: vaultPda,
+          vault: vaultAta,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      assert.fail("Should have failed");
+    } catch (error) {
+      const err = anchor.AnchorError.parse(error.logs);
+      assert.strictEqual(err.error.errorCode.code, "VaultAlreadyFullySigned");
+    }
+  });
 
-    const formerUserBalance = (
-      await provider.connection.getTokenAccountBalance(authorityAta)
+  it("Cannot withdraw if amount is 0 !", async () => {
+    try {
+      await program.methods
+        .withdraw(new anchor.BN(0))
+        .accountsStrict({
+          authority,
+          vaultMint,
+          signerAta: authorityAta,
+          vaultConfig: vaultPda,
+          vault: vaultAta,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      assert.fail("Should have failed");
+    } catch (error) {
+      const err = anchor.AnchorError.parse(error.logs);
+      assert.strictEqual(err.error.errorCode.code, "InvalidAmount");
+    }
+  });
+
+  it("Withdraw from Vault", async () => {
+    const withdrawAmount = new anchor.BN(5);
+    const beforeBalance = (
+      await connection.getTokenAccountBalance(authorityAta)
     ).value.uiAmount;
-    const formervaultBalance = (
-      await provider.connection.getTokenAccountBalance(vault)
-    ).value.uiAmount;
+
+    await program.methods
+      .switchVaultLock()
+      .accountsStrict({
+        signer: authority,
+        vaultMint,
+        signerAta: authorityAta,
+        vaultConfig: vaultPda,
+        vault: vaultAta,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
 
     await program.methods
       .withdraw(withdrawAmount)
       .accountsStrict({
-        authority: authority,
-        vaultMint: vaultMint,
+        authority,
+        vaultMint,
         signerAta: authorityAta,
         vaultConfig: vaultPda,
-        vault: vault,
+        vault: vaultAta,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
 
-    const newUserBalance = (
-      await provider.connection.getTokenAccountBalance(authorityAta)
-    ).value.uiAmount;
-    const newVaultBalance = (
-      await provider.connection.getTokenAccountBalance(vault)
-    ).value.uiAmount;
-    expect(newUserBalance).equal(formerUserBalance - amount);
-    expect(newVaultBalance).equal(formervaultBalance - amount);
+    const afterBalance = (await connection.getTokenAccountBalance(authorityAta))
+      .value.uiAmount;
+    expect(afterBalance).to.equal(beforeBalance + 5);
   });
 });

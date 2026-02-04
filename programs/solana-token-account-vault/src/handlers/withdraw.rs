@@ -4,9 +4,8 @@ use crate::state::VaultConfig;
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token_2022::close_account,
     token_interface::{
-        transfer_checked, CloseAccount, Mint, TokenAccount, TokenInterface, TransferChecked,
+        transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
     },
 };
 #[derive(Accounts)]
