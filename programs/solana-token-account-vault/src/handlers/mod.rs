@@ -4,8 +4,8 @@ pub use initialize_vault::*;
 pub mod deposit;
 pub use deposit::*;
 
-pub mod transfer;
-pub use transfer::*;
+pub mod sign;
+pub use sign::*;
 
 
 pub mod withdraw;

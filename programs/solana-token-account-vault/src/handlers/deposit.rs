@@ -47,10 +47,6 @@ impl<'info> Deposit<'info> {
 
         let vault_config = &mut self.vault_config;
         require!(vault_config.locked == false, VaultError::VaultIsLocked);
-        require!(
-            vault_config.num_of_signatures == vault_config.num_of_owners,
-            VaultError::VaultNotFullySigned
-        );
         vault_config.balance = vault_config.balance + amount;
 
         let cpi_accounts = TransferChecked {

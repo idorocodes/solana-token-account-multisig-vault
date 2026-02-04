@@ -9,5 +9,7 @@ pub enum VaultError{
     #[msg("Vault is locked! needs to be unlocked!")]
     VaultIsLocked,
     #[msg("all owners have not yet signed")]
-    VaultNotFullySigned
+    VaultNotFullySigned,
+    #[msg("invalid authority, cannot withdraw from vault!")]
+    InvalidAuthority,
 }

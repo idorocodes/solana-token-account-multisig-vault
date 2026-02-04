@@ -1,13 +1,13 @@
 use crate::constants::*;
+use crate::error::VaultError;
 use crate::state::VaultConfig;
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token_interface::{Mint, TokenAccount, TokenInterface},
+    token_interface::{transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked},
 };
-
 #[derive(Accounts)]
-pub struct Initialize<'info> {
+pub struct Sign<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
     #[account(
@@ -22,17 +22,14 @@ pub struct Initialize<'info> {
     )]
     pub signer_ata: InterfaceAccount<'info, TokenAccount>,
 
-    #[account(init,
-    payer = signer,
-    space = ANCHOR_DISCRIMINATOR + VaultConfig::INIT_SPACE,
+    #[account(mut,
     seeds = [VAULT_SEED,signer.key().as_ref()],
     bump
     )]
     pub vault_config: Account<'info, VaultConfig>,
 
     #[account(
-        init,
-        payer  = signer,
+        mut,
         associated_token::mint = vault_mint,
         associated_token::authority = vault_config,
         associated_token::token_program = token_program
@@ -44,19 +41,28 @@ pub struct Initialize<'info> {
     pub system_program: Program<'info, System>,
 }
 
-impl<'info> Initialize<'info> {
-    pub fn initialize(&mut self, owners: Vec<Pubkey>, bump: &InitializeBumps) -> Result<()> {
-        let number_of_owners = owners.len();
-        self.vault_config.set_inner(VaultConfig {
-            authority: self.signer.key(),
-            owners: owners,
-            balance: 0,
-            locked: false,
-            signed: false,
-            signed_owners: Vec::new(),
-            num_of_owners: number_of_owners as u64 + 1,
-            bump: bump.vault_config,
-        });
+impl<'info> Sign<'info> {
+    pub fn sign(&mut self) -> Result<()> {
+        let vault_config = &mut self.vault_config;
+        let signer = self.signer.key();
+
+        let signer_exists = require!(vault_config.locked == false, VaultError::VaultIsLocked);
+        vault_config.balance = vault_config.balance + amount;
+
+        let cpi_accounts = TransferChecked {
+            from: self.signer_ata.to_account_info(),
+            mint: self.vault_mint.to_account_info(),
+            to: self.vault.to_account_info(),
+            authority: self.signer.to_account_info(),
+        };
+
+        let cpi_program = self.token_program.to_account_info();
+
+        let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+
+        transfer_checked(cpi_ctx, amount, self.vault_mint.decimals)?;
+
+        self.vault_config.balance += amount;
         Ok(())
     }
 }
