@@ -21,7 +21,6 @@ This project implements a vault as:
 Logically: a multisig vault
 Physically: accounts + constraints
 
----
 
 ##  Security Model
 
@@ -37,7 +36,6 @@ Physically: accounts + constraints
 * **Explicit constraints (Anchor)**
   Ownership, signer checks, and token account validation are enforced at runtime.
 
----
 
 ##  Features
 
