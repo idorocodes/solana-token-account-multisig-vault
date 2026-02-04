@@ -26,6 +26,10 @@ pub mod solana_token_account_vault {
     }
     
     pub fn sign(ctx:Context<Sign>) ->Result<()>{
-      todo!()   
+      ctx.accounts.sign()   
+    }
+    
+    pub fn switch_vault_lock(ctx:Context<SwitchLock>) -> Result<()>{
+        ctx.accounts.switch_vault_lock()
     }
 }

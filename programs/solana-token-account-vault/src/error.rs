@@ -12,4 +12,12 @@ pub enum VaultError{
     VaultNotFullySigned,
     #[msg("invalid authority, cannot withdraw from vault!")]
     InvalidAuthority,
+    #[msg("Owner has already signed")]
+    HasAlreadySigned,
+    #[msg("vault fully signed")]
+    VaultAlreadyFullySigned,
+    #[msg("unauthorized to sign this vault")]
+    InvalidSigner,
+    #[msg("invalid authority, only authority can switch vault lock")]
+    NonAuthorityCannotSwitchLock,
 }

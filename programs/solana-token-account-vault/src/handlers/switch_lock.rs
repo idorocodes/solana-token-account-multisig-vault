@@ -7,7 +7,7 @@ use anchor_spl::{
     token_interface::{Mint, TokenAccount, TokenInterface},
 };
 #[derive(Accounts)]
-pub struct Sign<'info> {
+pub struct SwitchLock<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
     #[account(
@@ -41,30 +41,18 @@ pub struct Sign<'info> {
     pub system_program: Program<'info, System>,
 }
 
-impl<'info> Sign<'info> {
-    pub fn sign(&mut self) -> Result<()> {
+impl<'info> SwitchLock<'info> {
+    pub fn switch_vault_lock(&mut self) -> Result<()> {
         let vault_config = &mut self.vault_config;
-
-        require!(vault_config.locked == false, VaultError::VaultIsLocked);
-        require!(
-            vault_config.num_of_owners != vault_config.signed_owners.len() as u64,
-            VaultError::VaultAlreadyFullySigned
-        );
 
         let signer = self.signer.key();
 
         require!(
-            vault_config.owners.contains(&signer),
-            VaultError::InvalidSigner
+            vault_config.authority == signer,
+            VaultError::NonAuthorityCannotSwitchLock
         );
-        
-        let is_signed = self.vault_config.signed_owners.contains(&signer);
 
-        if !is_signed {
-            self.vault_config.signed_owners.push(signer);
-        }else{
-            return Err(VaultError::HasAlreadySigned.into());
-        }
+        vault_config.signed = !vault_config.signed;
 
         Ok(())
     }

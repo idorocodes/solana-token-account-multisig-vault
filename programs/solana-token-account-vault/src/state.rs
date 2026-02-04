@@ -9,6 +9,7 @@ pub struct VaultConfig {
     pub balance: u64,
     pub locked: bool,
     pub signed: bool,
+    #[max_len(10)]
     pub signed_owners:Vec<Pubkey>,
     pub num_of_owners: u64,
     pub bump: u8,

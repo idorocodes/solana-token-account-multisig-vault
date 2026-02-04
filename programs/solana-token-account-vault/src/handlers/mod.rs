@@ -10,3 +10,6 @@ pub use sign::*;
 
 pub mod withdraw;
 pub use withdraw::*;
+
+pub mod switch_lock;
+pub use switch_lock::*;
