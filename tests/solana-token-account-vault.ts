@@ -9,6 +9,7 @@ import {
   mintTo,
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddress,
 } from "@solana/spl-token";
 
 describe("solana-token-account-vault", () => {
@@ -23,9 +24,11 @@ describe("solana-token-account-vault", () => {
   const ownerOne = anchor.web3.Keypair.generate();
   const ownerTwo = anchor.web3.Keypair.generate();
   const ownerThree = anchor.web3.Keypair.generate();
+  const depositor = anchor.web3.Keypair.generate();
 
   let vaultMint: anchor.web3.PublicKey;
   let authorityAta: anchor.web3.PublicKey;
+  let depositorAta: anchor.web3.PublicKey;
   let vaultBump: number;
 
   let vaultPda: anchor.web3.PublicKey;
@@ -50,6 +53,10 @@ describe("solana-token-account-vault", () => {
       ownerThree.publicKey,
       10 * anchor.web3.LAMPORTS_PER_SOL
     );
+    await provider.connection.requestAirdrop(
+      depositor.publicKey,
+      10 * anchor.web3.LAMPORTS_PER_SOL
+    );
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
     //Create mints
@@ -71,7 +78,24 @@ describe("solana-token-account-vault", () => {
         vaultMint
       )
     );
+
+    depositorAta = getAssociatedTokenAddressSync(
+      vaultMint,
+      depositor.publicKey
+    );
+    const depositorAtaTx = new anchor.web3.Transaction().add(
+      createAssociatedTokenAccountInstruction(
+        provider.wallet.publicKey,
+        depositorAta,
+        depositor.publicKey,
+        vaultMint
+      )
+    );
+
+    await provider.sendAndConfirm(depositorAtaTx);
+
     await provider.sendAndConfirm(authorityAtaTx);
+
     await mintTo(
       provider.connection,
       provider.wallet.payer,
@@ -80,16 +104,23 @@ describe("solana-token-account-vault", () => {
       authority,
       amount * 2
     );
+
+    await mintTo(
+      provider.connection,
+      provider.wallet.payer,
+      vaultMint,
+      depositorAta,
+      authority,
+      amount * 2
+    );
   });
 
   it("Initialize Vault !", async () => {
     let owners = [ownerOne.publicKey, ownerTwo.publicKey, ownerThree.publicKey];
-
     [vaultPda, vaultBump] = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("idorosolvaut"), authority.toBuffer()],
       program.programId
     );
-
     vault = getAssociatedTokenAddressSync(vaultMint, vaultPda, true);
 
     const tx = await program.methods
@@ -111,9 +142,39 @@ describe("solana-token-account-vault", () => {
       await provider.connection.getTokenAccountBalance(vault)
     ).value.uiAmount;
 
-
-      const vaultConfigVault = await program.account.vaultConfig.fetch(vaultPda);
-      console.log("vault authority")
+    const vaultConfigVault = await program.account.vaultConfig.fetch(vaultPda);
+    console.log("vault authority", vaultConfigVault.authority.toString());
+    console.log("owners", vaultConfigVault.numOfOwners.toArray());
+    console.log("balance", vaultConfigVault.balance.toNumber());
     expect(vaultBalance).to.equal(0);
+  });
+  it("Deposit Vault !", async () => {
+    let amount = 10;
+    vault = getAssociatedTokenAddressSync(vaultMint, vaultPda, true);
+
+    const tx = await program.methods
+      .deposit(new anchor.BN(amount))
+      .accountsStrict({
+        signer: authority,
+        vaultMint: vaultMint,
+        signerAta: authorityAta,
+        vaultConfig: vaultPda,
+        vault: vault,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+    console.log("Your transaction signature", tx);
+
+    const vaultBalance = (
+      await provider.connection.getTokenAccountBalance(vault)
+    ).value.uiAmount;
+
+    const vaultConfigVault = await program.account.vaultConfig.fetch(vaultPda);
+    console.log("vault authority", vaultConfigVault.authority);
+    console.log("owners", vaultConfigVault.numOfOwners.toArray());
+    console.log("balance", vaultConfigVault.balance);
+    expect(vaultBalance).to.equal(amount);
   });
 });
